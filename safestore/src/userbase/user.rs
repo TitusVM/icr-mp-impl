@@ -4,7 +4,6 @@ pub struct User {
     pub username: String,
 }
 
-// User constructor
 impl User {
     pub fn new(id: i32, username: String) -> User {
         User {
