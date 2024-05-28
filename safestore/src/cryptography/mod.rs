@@ -1,7 +1,14 @@
 pub mod cryptography {
     use aes_gcm::{
         aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng}, Aes256Gcm, Error, Key, Nonce
-    };    
+    };
+
+    use argon2::{
+    password_hash::{
+        PasswordHash, PasswordHasher, PasswordVerifier, SaltString, Output
+        },
+        Argon2
+    }; 
 
     pub fn get_random_key() -> Result<[u8; 32], Error> {
         let mut key = [0u8; 32];
@@ -38,5 +45,16 @@ pub mod cryptography {
         plaintext.to_vec()
     
     }
-    
+
+    pub fn hash_password(password: &str, given_salt: Option<&SaltString>) -> (Vec<u8>, SaltString) {
+        let mut salt = SaltString::generate(&mut OsRng);
+        if !given_salt.is_none() {
+            salt = given_salt.unwrap().clone();
+        }
+        let argon2 = Argon2::default();
+        let password_hash = argon2.hash_password(password.as_bytes(), &salt).unwrap().to_string();
+        let parsed_hash = PasswordHash::new(&password_hash);
+        let hash = parsed_hash.unwrap().hash.unwrap().as_bytes().to_vec();
+        return (hash, salt.clone());
+    }
 }
