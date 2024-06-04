@@ -1,10 +1,12 @@
-use uuid::Uuid;
+use dryoc::sign::{SignedMessage, VecSignedMessage};
+use dryoc::types::StackByteArray;
+use dryoc::dryocbox::DryocBox;
 
-use crate::cryptography::cryptography;
+use crate::{authentication::user, cryptography::cryptography};
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct File {
-    pub uid: Vec<u8>,
     pub name: Vec<u8>,
     pub owner: Vec<u8>,
     pub data: Vec<u8>,
@@ -16,8 +18,7 @@ impl File {
         let name = File::random_name();
         let owner = "Nobody".as_bytes().to_vec();
         let data = File::random_content();
-        let uid = Uuid::new_v4().to_string().into_bytes();
-        File::new(uid, name.into_bytes(), owner, data.into_bytes())
+        File::new(name.into_bytes(), owner, data.into_bytes())
     }
 
     pub fn set_owner(&mut self, owner: Vec<u8>) {
@@ -34,9 +35,8 @@ impl File {
         let encrypted_name = cryptography::encrypt(&key, self.name.clone());
         let encrypted_data = cryptography::encrypt(&key, self.data.clone());
         let encrypted_owner = cryptography::encrypt(&key, self.owner.clone());
-        let encrypted_uid = cryptography::encrypt(&key, self.uid.clone());
 
-        let encrypted_file = File::new(encrypted_uid, encrypted_name, encrypted_owner, encrypted_data);
+        let encrypted_file = File::new(encrypted_name, encrypted_owner, encrypted_data);
         encrypted_file
     }
 
@@ -45,9 +45,8 @@ impl File {
         let decrypted_name = cryptography::decrypt(&key, self.name.clone());
         let decrypted_data = cryptography::decrypt(&key, self.data.clone());
         let decrypted_owner = cryptography::decrypt(&key, self.owner.clone());
-        let decrypted_uid = cryptography::decrypt(&key, self.uid.clone());
 
-        let decrypted_file = File::new(decrypted_uid, decrypted_name, decrypted_owner, decrypted_data);
+        let decrypted_file = File::new(decrypted_name, decrypted_owner, decrypted_data);
         decrypted_file
     }
     
@@ -62,9 +61,8 @@ impl File {
     }
     
 
-    pub fn new(uid: Vec<u8>, name: Vec<u8>, owner: Vec<u8>, data: Vec<u8>) -> File {
+    pub fn new(name: Vec<u8>, owner: Vec<u8>, data: Vec<u8>) -> File {
         File {
-            uid,
             name,
             owner,
             data,
@@ -72,7 +70,19 @@ impl File {
         }
     }
 
+    pub fn sign(&mut self, user: &user::User) {
+        let signature = user.signing_keypair.sign_with_defaults(&*self.data).expect("Error signing");
+        self.signature = signature.to_bytes();
+    }
+
+    pub fn verify(&self, user: &user::User) {
+        let signature: SignedMessage<StackByteArray<64>, Vec<u8>> = SignedMessage::from_bytes(&self.signature).expect("Error parsing signature");
+        signature
+            .verify(&user.signing_keypair.public_key)
+            .expect("Error verifying");
+    }
+
     const FILE_CONTENTS: [&'static str; 3] = ["Hello, World!", "This is a file.", "This is a file too."];
-    const FILE_NAMES: [&'static str; 3] = ["file1", "file2", "file3"];
+    const FILE_NAMES: [&'static str; 3] = ["myfile", "anotherfile", "athirdfile"];
 
 }

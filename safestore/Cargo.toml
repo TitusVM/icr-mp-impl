@@ -11,6 +11,7 @@ aes-gcm = "0.10.3"
 argon2 = "0.5.3"
 block-modes = "0.9.1"
 block-padding = "0.3.3"
+dryoc = "0.5.3"
 hex = "0.4.3"
 rand = "0.8.5"
 
