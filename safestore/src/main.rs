@@ -4,166 +4,175 @@ mod cryptography;
 
 use storage::file::File;
 use storage::folder::Folder;
+use storage::server::Server;
 use authentication::user::User;
-use cryptography::cryptography::{get_random_key, hash_password, encrypt, decrypt};
+use cryptography::cryptography::{get_random_key, hash_password, symmetric_encrypt, symmetric_decrypt};
 
 use argon2::password_hash::SaltString;
-use dryoc::sign::*;
-use dryoc::dryocbox::*;
-use uuid::Uuid;
 
 fn main() {
+    print_title();
+    println!("-------------------------------------------------------------");
+    println!("Welcome to SafeStore, a secure file storage system");
+    println!("-------------------------------------------------------------");
+    println!();
     let mut server = storage::server::Server::new();
-
-
-    let user1 = User::factory();
-    println!("Our first user: {}", user1.display_info());
-
-    let user1password = "password".as_bytes().to_vec();
-    let user_id = user1.id.clone();
-    let salt_string = SaltString::encode_b64(user_id.as_bytes()).unwrap();
-
-    let (password_hash, _) = hash_password(user1password, Some(&salt_string));
+    println!("[DEBUG] Creating Alice and Bob's accounts...");
+    create_and_add_alice(&mut server);
+    let alice_id = server.get_user(&"Alice".as_bytes().to_vec()).unwrap().id.clone();
+    create_and_add_bob(&mut server);
     
-    let (challenge_hash, challenge_salt) = hash_password(password_hash.clone(), None);
+    println!("[DEBUG] Alice and Bob's accounts have been created");
+    server.display_users();
+    println!("[DEBUG] Alice and Bob's root folders have been created");
+    server.display_root_folders();
+
+    println!("-------------------------------------------------------------");
+    println!("                      LOGIN PROCEDURE                        ");
+    println!("-------------------------------------------------------------");
+    println!("[DEBUG] Alice wants to log in...");
+    // Alice types in her password
+    let typedpassword: Vec<u8> = "password".as_bytes().to_vec();
+    let (typed_hash, _) = hash_password(
+        typedpassword.clone(), 
+        server.get_password_salt(
+            "Alice".as_bytes().to_vec()).as_ref()
+        );
+    let (typed_challenge_hash, _) = hash_password(typed_hash.clone(), Some(&SaltString::encode_b64(alice_id.as_bytes()).unwrap()));
     
-    let (master_key, _) = hash_password(password_hash.clone(), None);
-    let enc_master_key = encrypt(&password_hash, master_key.to_vec());
-
-    let username = user1.name.clone();
-
-    let mut user1_root_folder = Folder::new(user_id.as_bytes().to_vec(), user1.name.clone());
-    println!("We named the folder: {:?}", Uuid::from_bytes(*user_id.as_bytes().to_vec().as_array()));
-    user1_root_folder.add_file(File::factory(), get_random_key().unwrap().to_vec());
-    let user1_root_folder = user1_root_folder.encrypt(master_key.to_vec(), true);
-
-    server.add_user(user1, enc_master_key, challenge_salt.clone(), challenge_hash.clone(), user1_root_folder.clone());
-
-
-    let typedpassword = "password".as_bytes().to_vec();
-    let typed_salt = SaltString::encode_b64(user_id.as_bytes()).unwrap();
-    let (typed_hash, _) = hash_password(typedpassword.clone(), Some(&typed_salt));
-
-
-    let (root_folder, enc_master_key) = server.login(username, typed_hash.clone());
+    // Alice requests to login
+    let (root_folder, enc_master_key) = 
+        server
+            .login(
+                &"Alice".as_bytes().to_vec(), 
+                typed_challenge_hash.clone()
+        );
     
-    let dec_master_key = decrypt(&typed_hash, enc_master_key.clone());
-    let dec_folder = root_folder.decrypt(dec_master_key.to_vec(), true);
+    // Alice can decrypt her master key
+    let dec_master_key = symmetric_decrypt(&typed_hash, enc_master_key.clone());
+    let mut dec_folder = root_folder.symmetric_decrypt(dec_master_key.to_vec(), true);
+    dec_folder.add_file(File::factory(&"Alice".as_bytes().to_vec()), get_random_key().unwrap().to_vec());
+    println!("{}", dec_folder.display(0));
+    
+    println!("-------------------------------------------------------------");
+    println!("                 CHANGE PASSWORD PROCEDURE                   ");
+    println!("-------------------------------------------------------------");
+    println!("[DEBUG] Alice wants to change her password...");
+    // Alice decides to change her password
+    let new_password = "newpassword".as_bytes().to_vec();
+    let (new_password_hash, new_password_salt) = hash_password(new_password.clone(), None);
+    let (new_challenge_hash, _) = hash_password(new_password_hash.clone(), Some(&SaltString::encode_b64(alice_id.as_bytes()).unwrap()));
+    let (new_master_key, _) = hash_password(new_password_hash.clone(), None);
+    let new_enc_master_key = symmetric_encrypt(&new_password_hash, new_master_key.to_vec());
+    let new_enc_folder = dec_folder.symmetric_encrypt(new_master_key.to_vec(), true);
+    
+    println!("[DEBUG] Alice's password has been changed");
+    println!("[DEBUG] Alice logs out and provides the new hashes associated with her new password");
+    // Alice logs out and provides the new hashes associated with her new password 
+    server.logout("Alice".as_bytes().to_vec(), new_enc_folder, new_enc_master_key, typed_hash.clone(), Some(new_challenge_hash.clone()), Some(new_password_salt.clone()));
+    
+    println!("[DEBUG] Alice logs in again using her new password");
+    // Alice wants to log in again using her newly set password
+    let new_password_typed = "newpassword".as_bytes().to_vec();
+    let (new_hash_typed, _) = hash_password(new_password_typed.clone(), server.get_password_salt("Alice".as_bytes().to_vec()).as_ref());
+    let (new_challenge_hash_typed, _) = hash_password(new_hash_typed.clone(), Some(&SaltString::encode_b64(alice_id.as_bytes()).unwrap()));
+    
+    let (root_folder, enc_master_key) = server.login(&"Alice".as_bytes().to_vec(), new_challenge_hash_typed.clone());
+    let dec_master_key = symmetric_decrypt(&new_hash_typed, enc_master_key.clone());
+    let dec_folder = root_folder.symmetric_decrypt(dec_master_key.to_vec(), true);
+    
+    // Alice consults her root folder
     println!("{}", dec_folder.display(0));
 
-
-
-    // let keypair = SigningKeyPair::gen_with_defaults();
-    // let message = b"Fair is foul, and foul is fair: Hover through the fog and filthy air.";
-
-    // // Sign the message, using default types (stack-allocated byte array, Vec<u8>)
-    // let signed_message = keypair.sign_with_defaults(message).expect("signing failed");
-
-    // // Verify the message signature
-    // signed_message
-    //     .verify(&keypair.public_key)
-    //     .expect("verification failed");
-
-    // let sender_keypair = KeyPair::gen();
-    // let recipient_keypair = KeyPair::gen();
-
-    // // Randomly generate a nonce
-    // let nonce = Nonce::gen();
-
-    // let file = File::factory();
-    // let mut folder = Folder::new(vec![1, 2, 3], "folder".as_bytes().to_vec(), vec![4, 5, 6]);
-    // folder.add_file(file, get_random_key().unwrap().to_vec());
-
-    // println!("{}", folder.display(0));
-
-    // let message = folder.to_bytes();
-
-    // // Encrypt the message into a Vec<u8>-based box.
-    // let dryocbox = DryocBox::encrypt_to_vecbox(
-    //     &message,
-    //     &nonce,
-    //     &recipient_keypair.public_key,
-    //     &sender_keypair.secret_key,
-    // )
-    // .expect("unable to encrypt");
-
-    // // Convert into a libsodium compatible box as a Vec<u8>
-    // let sodium_box = dryocbox.to_vec();
-
-    // // Load the libsodium box into a DryocBox
-    // let dryocbox = DryocBox::from_bytes(&sodium_box).expect("failed to read box");
-
-    // // Decrypt the same box back to the original message, with the sender/recipient
-    // // keypairs flipped.
-    // let decrypted = dryocbox
-    //     .decrypt_to_vec(
-    //         &nonce,
-    //         &sender_keypair.public_key,
-    //         &recipient_keypair.secret_key,
-    //     )
-    //     .expect("unable to decrypt");
-
-    // let folder = Folder::from_bytes(decrypted);
-    // println!("{}", folder.display(0));
+    println!("-------------------------------------------------------------");
+    println!("                  SHARING FOLDER PROCEDURE                   ");
+    println!("-------------------------------------------------------------");
+    println!("[DEBUG] Alice wants to share the home folder with Bob...");
+    println!("[DEBUG] Alice encrypts the home folder with Bob's public key");
     
+    let home_folder = dec_folder.folders.iter().find(|folder| folder.name == "home".as_bytes().to_vec()).unwrap();
+    let bob_keypair = server.get_user(&"Bob".as_bytes().to_vec()).unwrap().keypair;
+    let alice_keypair = server.get_user(&"Alice".as_bytes().to_vec()).unwrap().keypair;
 
-    // let user = User::factory();
-    // let file1 = File::factory();
-    // let file2 = File::factory();
-    // let file3 = File::factory();
-
-    // println!("Our first user: {}", user.display_info());
-
-    // let mut folder1 = Folder::new(vec![7, 8, 9], "folder1".as_bytes().to_vec(), user.id.as_bytes().to_vec());
+    let enc_home_folder = home_folder.asymmetric_encrypt(bob_keypair, alice_keypair);
     
-    // let key1 = get_random_key().unwrap();
-    // let key2 = get_random_key().unwrap();
-
-    // folder1.add_file(file1, key1.to_vec())
-    // folder1.add_file(file2, key2.to_vec());
-
-    // let key3 = get_random_key().unwrap();
-
-    // let mut folder2 = Folder::new(vec![10, 11, 12], "folder2".as_bytes().to_vec(), user.id.as_bytes().to_vec());
+    println!("[DEBUG] Bob can now attempt to decrypt the home folder using his private key");
+    let dec_home_folder = enc_home_folder.asymmetric_decrypt(bob_keypair, alice_keypair);
     
-    // let key4 = get_random_key().unwrap();
-
-    // folder2.add_file(file3, key3.to_vec());
-    // folder2.add_folder(folder1, key4.to_vec());
-
-    // // println!("{}", folder2.display(0));
-
-    // let master_key = get_random_key().unwrap();
-
-    // let encrypted_folder = folder2.encrypt(master_key.to_vec());
-
-    // println!("{}", encrypted_folder.display(0));
-    
-    
-    // // Setting a password
-    // let set_password = String::from("password");
-    // let (password_hash, salt) = hash_password(&set_password, None);
-
-    // let enc_master_key = encrypt(&password_hash, master_key.to_vec());
-
-    // let mut typed_password = String::new();
-    // print!("Please enter your password: ");
-    // let _=stdout().flush();
-    // stdin().read_line(&mut typed_password).expect("Did not enter a correct string");
-    // if let Some('\n')=typed_password.chars().next_back() {
-    //     typed_password.pop();
-    // }
-    // if let Some('\r')=typed_password.chars().next_back() {
-    //     typed_password.pop();
-    // }
-
-    // let (typed_password_hash, _) = hash_password(&typed_password, Some(&salt));
-    // let dec_master_key = decrypt(&typed_password_hash, enc_master_key.clone());
-
-    // let decrypted_folder = encrypted_folder.decrypt(dec_master_key.to_vec());
-
-    // println!("{}", decrypted_folder.display(0));
-
-   
+    println!("{}", dec_home_folder.display(1));
 }
 
+pub fn create_and_add_alice(server: &mut Server) {
+    let alice = User::factory(Some("Alice".as_bytes().to_vec()));
+
+    let alice_password = "password".as_bytes().to_vec();
+    let alice_id = alice.id.clone();
+    
+    let (password_hash, password_salt) = hash_password(alice_password, None);
+    
+    let challenge_salt = SaltString::encode_b64(alice_id.as_bytes()).unwrap();
+    let (challenge_hash, challenge_salt) = hash_password(password_hash.clone(), Some(&challenge_salt));
+    
+    let (master_key, _) = hash_password(password_hash.clone(), None);
+    let enc_master_key = symmetric_encrypt(&password_hash, master_key.to_vec());
+
+    let mut alice_root_folder = Folder::new(alice_id.as_bytes().to_vec(), alice.name.clone());
+    
+    let mut other_folder = Folder::new("home".as_bytes().to_vec(), alice.name.clone());
+    other_folder.add_file(File::factory(&alice.name), get_random_key().unwrap().to_vec());
+    
+    alice_root_folder.add_folder(other_folder, get_random_key().unwrap().to_vec());
+    alice_root_folder.add_file(File::factory(&alice.name), get_random_key().unwrap().to_vec());
+    let enc_alice_root_folder = alice_root_folder.symmetric_encrypt(master_key.to_vec(), true);
+
+    server.add_user(alice, enc_master_key, password_salt, challenge_salt.clone(), challenge_hash.clone(), enc_alice_root_folder.clone());
+}
+
+pub fn create_and_add_bob(server: &mut Server) {
+    let bob = User::factory(Some("Bob".as_bytes().to_vec()));
+
+    let bob_password = "password".as_bytes().to_vec();
+    let bob_id = bob.id.clone();
+    
+    let (password_hash, password_salt) = hash_password(bob_password, None);
+    
+    let challenge_salt = SaltString::encode_b64(bob_id.as_bytes()).unwrap();
+    let (challenge_hash, challenge_salt) = hash_password(password_hash.clone(), Some(&challenge_salt));
+    
+    let (master_key, _) = hash_password(password_hash.clone(), None);
+    let enc_master_key = symmetric_encrypt(&password_hash, master_key.to_vec());
+
+    let mut bob_root_folder = Folder::new(bob_id.as_bytes().to_vec(), bob.name.clone());
+
+    bob_root_folder.add_file(File::factory(&bob.name), get_random_key().unwrap().to_vec());
+    let enc_bob_root_folder = bob_root_folder.symmetric_encrypt(master_key.to_vec(), true);
+
+    server.add_user(bob, enc_master_key, password_salt, challenge_salt.clone(), challenge_hash.clone(), enc_bob_root_folder.clone());
+}
+
+pub fn print_title() {
+    let title_string = r" .----------------.  .----------------.  .----------------.  .----------------. ";
+    let title_string1 = r"| .--------------. || .--------------. || .--------------. || .--------------. |";
+    let title_string2 = r"| |    _______   | || |  _________   | || |    _______   | || |  _________   | |";
+    let title_string3 = r"| |   /  ___  |  | || | |_   ___  |  | || |   /  ___  |  | || | |  _   _  |  | |";
+    let title_string4 = r"| |  |  (__ \_|  | || |   | |_  \_|  | || |  |  (__ \_|  | || | |_/ | | \_|  | |";
+    let title_string5 = r"| |   '.___`-.   | || |   |  _|      | || |   '.___`-.   | || |     | |      | |";
+    let title_string6 = r"| |  |`\____) |  | || |  _| |_       | || |  |`\____) |  | || |    _| |_     | |";
+    let title_string7 = r"| |  |_______.'  | || | |_____|      | || |  |_______.'  | || |   |_____|    | |";
+    let title_string8 = r"| |              | || |              | || |              | || |              | |";
+    let title_string9 = r"| '--------------' || '--------------' || '--------------' || '--------------' |";
+    let title_string10 = r" '----------------'  '----------------'  '----------------'  '----------------' ";
+
+    println!("{}", title_string);
+    println!("{}", title_string1);
+    println!("{}", title_string2);
+    println!("{}", title_string3);
+    println!("{}", title_string4);
+    println!("{}", title_string5);
+    println!("{}", title_string6);
+    println!("{}", title_string7);
+    println!("{}", title_string8);
+    println!("{}", title_string9);
+    println!("{}", title_string10);
+    println!("By Titus Abele, 2024");
+}

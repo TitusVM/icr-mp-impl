@@ -1,11 +1,14 @@
 pub mod cryptography {
     use aes_gcm::{
-        aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng}, Aes256Gcm, Error, Key, Nonce
+        aead::{rand_core::RngCore, Aead, AeadCore, KeyInit, OsRng}, Aes256Gcm, Error, Key
     };
+    
+    use dryoc::classic::crypto_box::*;
+    use dryoc::constants::CRYPTO_BOX_MACBYTES;
 
     use argon2::{
     password_hash::{
-        PasswordHash, PasswordHasher, SaltString
+        PasswordHasher, SaltString
         },
         Argon2
     };
@@ -16,7 +19,7 @@ pub mod cryptography {
         Ok(key)
     }
     
-    pub fn encrypt(key: &[u8], plaintext: Vec<u8>) -> Vec<u8> {
+    pub fn symmetric_encrypt(key: &[u8], plaintext: Vec<u8>) -> Vec<u8> {
         let key = Key::<Aes256Gcm>::from_slice(key);
         let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
         
@@ -31,11 +34,11 @@ pub mod cryptography {
         encrypted_data
     }
     
-    pub fn decrypt(key: &[u8], encrypted_data: Vec<u8>) -> Vec<u8> {
+    pub fn symmetric_decrypt(key: &[u8], encrypted_data: Vec<u8>) -> Vec<u8> {
         let key = Key::<Aes256Gcm>::from_slice(key);
     
         let (nonce_arr, ciphered_data) = encrypted_data.split_at(12);
-        let nonce = Nonce::from_slice(nonce_arr);
+        let nonce = aes_gcm::Nonce::from_slice(nonce_arr);
     
         let cipher = Aes256Gcm::new(key);
     
@@ -44,6 +47,24 @@ pub mod cryptography {
 
         plaintext.to_vec()
     
+    }
+
+    pub fn asymmetric_encrypt(sender_sk: SecretKey, recipient_pk: PublicKey, message: Vec<u8>) -> Vec<u8> {
+        // nonce is just default for now
+        let nonce = Nonce::default();
+        let mut ciphertext = vec![0u8; message.len() + CRYPTO_BOX_MACBYTES];
+        crypto_box_easy(&mut ciphertext, &message, &nonce, &recipient_pk, &sender_sk)
+            .expect("encrypt failed");
+        ciphertext
+    }
+
+    pub fn asymmetric_decrypt(sender_pk: PublicKey, recipient_sk: SecretKey, ciphertext: Vec<u8>) -> Vec<u8> {
+        // nonce is just default for now
+        let nonce = Nonce::default();
+        let mut message = vec![0u8; ciphertext.len() - CRYPTO_BOX_MACBYTES];
+        crypto_box_open_easy(&mut message, &ciphertext, &nonce, &sender_pk, &recipient_sk)
+            .expect("decrypt failed");
+        message
     }
 
     pub fn hash_password(password: Vec<u8>, given_salt: Option<&SaltString>) -> (Vec<u8>, SaltString) {

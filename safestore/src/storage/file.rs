@@ -1,6 +1,6 @@
-use dryoc::sign::{SignedMessage, VecSignedMessage};
+use dryoc::classic::crypto_box::PublicKey;
+use dryoc::{classic::crypto_box::SecretKey, sign::SignedMessage};
 use dryoc::types::StackByteArray;
-use dryoc::dryocbox::DryocBox;
 
 use crate::{authentication::user, cryptography::cryptography};
 
@@ -14,11 +14,10 @@ pub struct File {
 }
 
 impl File {
-    pub fn factory() -> File {
+    pub fn factory(owner: &Vec<u8>) -> File {
         let name = File::random_name();
-        let owner = "Nobody".as_bytes().to_vec();
         let data = File::random_content();
-        File::new(name.into_bytes(), owner, data.into_bytes())
+        File::new(name.into_bytes(), owner.clone(), data.into_bytes())
     }
 
     pub fn set_owner(&mut self, owner: Vec<u8>) {
@@ -30,21 +29,41 @@ impl File {
         format!("{}├── File: name: {}, content: {}", indent, String::from_utf8_lossy(&self.name), String::from_utf8_lossy(&self.data))
     }
 
-    pub fn encrypt(&self, key: Vec<u8>) -> File {
-        // We need to encrypt: name, data, owner, uid
-        let encrypted_name = cryptography::encrypt(&key, self.name.clone());
-        let encrypted_data = cryptography::encrypt(&key, self.data.clone());
-        let encrypted_owner = cryptography::encrypt(&key, self.owner.clone());
+    pub fn symmetric_encrypt(&self, key: Vec<u8>) -> File {
+        // We need to encrypt: name, data, owner
+        let encrypted_name = cryptography::symmetric_encrypt(&key, self.name.clone());
+        let encrypted_data = cryptography::symmetric_encrypt(&key, self.data.clone());
+        let encrypted_owner = cryptography::symmetric_encrypt(&key, self.owner.clone());
 
         let encrypted_file = File::new(encrypted_name, encrypted_owner, encrypted_data);
         encrypted_file
     }
 
-    pub fn decrypt(&self, key: Vec<u8>) -> File {
-        // We need to decrypt: name, data, owner, uid
-        let decrypted_name = cryptography::decrypt(&key, self.name.clone());
-        let decrypted_data = cryptography::decrypt(&key, self.data.clone());
-        let decrypted_owner = cryptography::decrypt(&key, self.owner.clone());
+    pub fn symmetric_decrypt(&self, key: Vec<u8>) -> File {
+        // We need to decrypt: name, data, owner
+        let decrypted_name = cryptography::symmetric_decrypt(&key, self.name.clone());
+        let decrypted_data = cryptography::symmetric_decrypt(&key, self.data.clone());
+        let decrypted_owner = cryptography::symmetric_decrypt(&key, self.owner.clone());
+
+        let decrypted_file = File::new(decrypted_name, decrypted_owner, decrypted_data);
+        decrypted_file
+    }
+
+    pub fn asymmetric_encrypt(&self, receiver: (PublicKey, SecretKey), sender: (PublicKey, SecretKey)) -> File {
+        // We need to encrypt: name, data, owner
+        let encrypted_name = cryptography::asymmetric_encrypt(sender.1, receiver.0, self.name.clone());
+        let encrypted_data = cryptography::asymmetric_encrypt(sender.1, receiver.0, self.data.clone());
+        let encrypted_owner = cryptography::asymmetric_encrypt(sender.1, receiver.0, self.owner.clone());
+        
+        let encrypted_file = File::new(encrypted_name, encrypted_owner, encrypted_data);
+        encrypted_file
+    }
+
+    pub fn asymmetric_decrypt(&self, receiver: (PublicKey, SecretKey), sender: (PublicKey, SecretKey)) -> File {
+        // We need to decrypt: name, data, owner
+        let decrypted_name = cryptography::asymmetric_decrypt(sender.0, receiver.1, self.name.clone());
+        let decrypted_data = cryptography::asymmetric_decrypt(sender.0, receiver.1, self.data.clone());
+        let decrypted_owner = cryptography::asymmetric_decrypt(sender.0, receiver.1, self.owner.clone());
 
         let decrypted_file = File::new(decrypted_name, decrypted_owner, decrypted_data);
         decrypted_file
@@ -71,7 +90,7 @@ impl File {
     }
 
     pub fn sign(&mut self, user: &user::User) {
-        let signature = user.signing_keypair.sign_with_defaults(&*self.data).expect("Error signing");
+        let signature = user.signing_keypair.sign_with_defaults(self.data.clone()).expect("Error signing");
         self.signature = signature.to_bytes();
     }
 
@@ -80,6 +99,15 @@ impl File {
         signature
             .verify(&user.signing_keypair.public_key)
             .expect("Error verifying");
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.name);
+        bytes.extend_from_slice(&self.owner);
+        bytes.extend_from_slice(&self.data);
+        bytes.extend_from_slice(&self.signature);
+        bytes
     }
 
     const FILE_CONTENTS: [&'static str; 3] = ["Hello, World!", "This is a file.", "This is a file too."];
