@@ -94,9 +94,18 @@ fn main() {
     let bob_keypair = server.get_user(&"Bob".as_bytes().to_vec()).unwrap().keypair;
     let alice_keypair = server.get_user(&"Alice".as_bytes().to_vec()).unwrap().keypair;
 
-    let enc_home_folder = home_folder.asymmetric_encrypt(bob_keypair, alice_keypair);
+    let mut enc_home_folder = home_folder.asymmetric_encrypt(bob_keypair, alice_keypair);
     
+    println!("[DEBUG] Alice signs the encrypted home folder");
+    enc_home_folder.sign(server.get_user(&"Alice".as_bytes().to_vec()).unwrap());
+
+    
+    println!("[DEBUG] Alice shares the encrypted and signed home folder with Bob");
+    println!("[DEBUG] Bob can verify the signature of the home folder");
+    let valid = enc_home_folder.verify(server.get_user(&"Alice".as_bytes().to_vec()).unwrap());
+    println!("Signature is valid: {}", valid);
     println!("[DEBUG] Bob can now attempt to decrypt the home folder using his private key");
+
     let dec_home_folder = enc_home_folder.asymmetric_decrypt(bob_keypair, alice_keypair);
     
     println!("{}", dec_home_folder.display(1));
