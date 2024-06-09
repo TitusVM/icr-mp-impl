@@ -283,12 +283,8 @@ impl Folder {
     }
 
     pub fn verify(&self, user: &user::User) -> bool {
-        let computed_signature = user.signing_keypair.sign_with_defaults(self.to_bytes()).expect("Error signing");
         let signature: SignedMessage<StackByteArray<64>, Vec<u8>> = SignedMessage::from_bytes(&self.signature).expect("Error parsing signature");
-        if signature.verify(&user.signing_keypair.public_key).is_err() {
-            return false;
-        }
-        computed_signature == signature
+        if signature.verify(&user.signing_keypair.public_key).is_err()
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
