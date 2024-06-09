@@ -284,7 +284,7 @@ impl Folder {
 
     pub fn verify(&self, user: &user::User) -> bool {
         let signature: SignedMessage<StackByteArray<64>, Vec<u8>> = SignedMessage::from_bytes(&self.signature).expect("Error parsing signature");
-        if signature.verify(&user.signing_keypair.public_key).is_err()
+        signature.verify(&user.signing_keypair.public_key).is_ok()
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
